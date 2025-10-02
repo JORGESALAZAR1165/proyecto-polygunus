@@ -1,3 +1,3 @@
-# proyecto-polygunus
+# proyecto-polygonus
 PROYECTO DECLARACION DE RENTA PN POLYGUNUS RENTA PERSONAS NATURALES 
 formato markdown
