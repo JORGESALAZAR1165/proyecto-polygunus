@@ -1,0 +1,504 @@
+import math
+import sys
+import os 
+from typing import Dict, Any, Tuple
+
+# --- CONSTANTES DE LA VIGENCIA FISCAL 2024 ---
+# UVT (Unidad de Valor Tributario) para el año 2024
+UVT = 47065
+
+# Límites en UVT (Ley 2277 de 2022 y E.T.)
+LIMITE_RENTA_EXENTA_25_PCT_UVT = 790
+LIMITE_GENERAL_DEDUCCIONES_EXENTAS_UVT = 1340
+LIMITE_DEDUCCION_DEPENDIENTES_UVT = 384
+LIMITE_DEDUCCION_MEDICINA_PREPAGADA_UVT = 192
+LIMITE_DEDUCCION_INTERESES_VIVIENDA_UVT = 1200
+LIMITE_PENSION_AFC_VOLUNTARIA_UVT = 3800
+LIMITE_DEDUCCION_FACTURA_ELECTRONICA_UVT = 240
+
+# Porcentajes
+LIMITE_PORCENTUAL_GENERAL = 0.40  # Límite general: 40%
+PORCENTAJE_RENTA_EXENTA_25_PCT = 0.25
+PORCENTAJE_DEDUCCION_GMF = 0.50
+PORCENTAJE_DEDUCCION_FACTURA = 0.01
+
+# Porcentajes de Anticipo (Art. 807 E.T.)
+PORCENTAJES_ANTICIPO = {
+    1: 0.25, # Primer año
+    2: 0.50, # Segundo año
+    3: 0.75  # Tercer año en adelante
+}
+
+# --- FUNCIONES DE UTILIDAD ---
+
+def limpiar_consola():
+    """Limpia la consola para una presentación más limpia."""
+    # Uso de 'os.system' para una funcionalidad estándar de limpieza de consola
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def uvt_a_pesos(valor_uvt: float) -> int:
+    """Convierte un valor de UVT a pesos colombianos, redondeando al peso superior."""
+    return math.ceil(valor_uvt * UVT)
+
+def pesos_a_uvt(valor_pesos: float) -> float:
+    """Convierte un valor en pesos colombianos a UVT."""
+    if UVT == 0:
+        return 0.0
+    return valor_pesos / UVT
+
+def formatear_pesos(valor: float) -> str:
+    """Formatea un número a estilo moneda colombiana ($ 1.234.567)."""
+    valor_redondeado = round(valor)
+    
+    if valor_redondeado < 0:
+        # Formato para valores negativos: ($ 1.234)
+        return f"({formatear_pesos(abs(valor_redondeado))})".replace("$ ", "$")
+
+    # Formato positivo: $ 1.234.567
+    return f"$ {valor_redondeado:,.0f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def solicitar_valor(concepto: str, tipo: Any = float) -> float | int:
+    """Solicita un valor numérico al usuario y maneja errores."""
+    while True:
+        try:
+            # Si el tipo es float, se asume que es un valor monetario y se añade el '$'
+            prompt = f"|> {concepto}: $ " if tipo == float else f"|> {concepto}: "
+            
+            valor = input(prompt)
+            # Limpiar formato de miles (punto o coma) para facilitar la entrada
+            valor = valor.replace('.', '').replace(',', '')
+            
+            if not valor:
+                return 0.0 if tipo == float else 0
+            
+            if tipo == int:
+                return int(valor)
+            elif tipo == float:
+                return float(valor)
+            
+        except ValueError:
+            print("\n  [ERROR]: Ingrese un valor numérico válido (sin puntos o comas de miles).")
+        except KeyboardInterrupt:
+            # Manejo de interrupción para salir del programa de forma segura
+            print("\n  [AVISO]: Operación cancelada por el usuario. Saliendo del programa.")
+            sys.exit(0)
+
+def imprimir_titulo_seccion(titulo: str):
+    """Imprime un título de sección con formato estético."""
+    print(f"\n   {'-' * 70}")
+    print(f"   | {titulo.upper():<66} |")
+    print(f"   {'-' * 70}")
+
+# --- CÁLCULOS TRIBUTARIOS ESPECÍFICOS ---
+
+def calcular_cesantias_exentas(ingreso_mensual_promedio: float, cesantias_pagadas: float) -> float:
+    """
+    Calcula el monto de Cesantías Exentas según el Art. 206 Num. 4 E.T.
+    Limitado al valor de las cesantías pagadas/consignadas (cesantias_pagadas).
+    """
+    if ingreso_mensual_promedio <= 0 or cesantias_pagadas <= 0:
+        return 0.0
+        
+    imp_uvt = pesos_a_uvt(ingreso_mensual_promedio)
+    exencion_mensual_uvt = 0.0
+    
+    # Tabla de exención de cesantías (Art. 206 Num. 4 E.T.)
+    if imp_uvt <= 350:
+        exencion_mensual_uvt = imp_uvt
+    elif imp_uvt <= 410:
+        exencion_mensual_uvt = 350 + (imp_uvt - 350) * 0.95
+    elif imp_uvt <= 470:
+        exencion_mensual_uvt = 410 + (imp_uvt - 410) * 0.90
+    elif imp_uvt <= 530:
+        exencion_mensual_uvt = 470 + (imp_uvt - 470) * 0.85
+    elif imp_uvt <= 590:
+        exencion_mensual_uvt = 530 + (imp_uvt - 530) * 0.80
+    elif imp_uvt <= 650:
+        exencion_mensual_uvt = 590 + (imp_uvt - 590) * 0.75
+    elif imp_uvt <= 710:
+        exencion_mensual_uvt = 650 + (imp_uvt - 650) * 0.70
+    elif imp_uvt <= 770:
+        exencion_mensual_uvt = 710 + (imp_uvt - 710) * 0.65
+    elif imp_uvt <= 830:
+        exencion_mensual_uvt = 770 + (imp_uvt - 770) * 0.60
+    elif imp_uvt <= 890:
+        exencion_mensual_uvt = 830 + (imp_uvt - 830) * 0.55
+    else: # Mayor a 890 UVT
+        exencion_mensual_uvt = 890 + (imp_uvt - 890) * 0.50
+
+    # Para el cálculo anual de las cesantías, se toma el valor exento total,
+    # que se limita por el valor real de las cesantías pagadas.
+    # El valor exento de la tabla es el tope, el valor pagado es el valor a depurar.
+    exencion_anual_por_tabla_cop = uvt_a_pesos(exencion_mensual_uvt * 12) # Se extrapola a un tope anual
+    
+    renta_exenta_cesantias = min(cesantias_pagadas, exencion_anual_por_tabla_cop)
+    
+    return renta_exenta_cesantias
+
+
+def calcular_impuesto_241(renta_liquida_gravable_uvt: float) -> float:
+    """
+    Aplica la tabla del Artículo 241 del Estatuto Tributario (en UVT).
+    """
+    RLG = renta_liquida_gravable_uvt
+    impuesto_uvt = 0.0
+
+    if RLG <= 1090:
+        impuesto_uvt = 0.0
+    elif RLG <= 1770:
+        # Tarifa: 19% (RLG - 1090)
+        impuesto_uvt = (RLG - 1090) * 0.19
+    elif RLG <= 4100:
+        # Impuesto: 129 UVT + (RLG - 1770) * 28%
+        impuesto_uvt = 129 + (RLG - 1770) * 0.28
+    elif RLG <= 8670:
+        # Impuesto: 774 UVT + (RLG - 4100) * 33%
+        impuesto_uvt = 774 + (RLG - 4100) * 0.33
+    elif RLG <= 18970:
+        # Impuesto: 2269 UVT + (RLG - 8670) * 35%
+        impuesto_uvt = 2269 + (RLG - 8670) * 0.35
+    elif RLG <= 31610:
+        # Impuesto: 5942 UVT + (RLG - 18970) * 37%
+        impuesto_uvt = 5942 + (RLG - 18970) * 0.37
+    else: # RLG > 31,610 UVT
+        # Impuesto: 10675 UVT + (RLG - 31610) * 39%
+        impuesto_uvt = 10675 + (RLG - 31610) * 0.39
+
+    return impuesto_uvt
+
+def calcular_anticipo_renta(impuesto_neto_actual: float, impuesto_neto_anterior: float, retenciones_practicadas: float, anios_declarando: int) -> Tuple[int, Dict[str, float | int]]:
+    """
+    Calcula el Anticipo de Renta para el año siguiente usando el menor valor de los dos métodos (Art. 807 E.T.).
+    """
+    
+    # Determinar la tasa de anticipo (25%, 50%, 75%)
+    tasa_anticipo = PORCENTAJES_ANTICIPO.get(min(anios_declarando, 3), 0.75) 
+
+    # --- MÉTODO #1: Sobre el Impuesto Neto del Año Actual ---
+    base_m1 = impuesto_neto_actual * tasa_anticipo
+    anticipo_m1 = max(0.0, base_m1 - retenciones_practicadas)
+
+    # --- MÉTODO #2: Sobre el Promedio del Impuesto Neto (Actual y Anterior) ---
+    if impuesto_neto_anterior <= 0:
+        # Si no hay impuesto neto del año anterior, el promedio no es aplicable o resulta en base cero.
+        anticipo_m2 = 0.0
+        promedio_impuesto_neto = 0.0
+    else:
+        # Promedio del Impuesto Neto
+        promedio_impuesto_neto = (impuesto_neto_actual + impuesto_neto_anterior) / 2
+        
+        base_m2 = promedio_impuesto_neto * tasa_anticipo
+        anticipo_m2 = max(0.0, base_m2 - retenciones_practicadas)
+
+    # El anticipo final es el menor valor entre los dos métodos, redondeado al peso superior
+    anticipo_definitivo = math.ceil(min(anticipo_m1, anticipo_m2))
+    
+    # Detalle del cálculo para el reporte final
+    detalle_anticipo = {
+        'tasa': tasa_anticipo,
+        'anticipo_m1': math.ceil(anticipo_m1),
+        'anticipo_m2': math.ceil(anticipo_m2),
+        'anticipo_definitivo': anticipo_definitivo,
+        'base_m1': base_m1,
+        'base_m2': base_m2
+    }
+    
+    return anticipo_definitivo, detalle_anticipo
+
+
+def calculadora_renta_laboral_final():
+    """Función principal que ejecuta la depuración y liquidación."""
+
+    limpiar_consola()
+    print(" " * 10 + "╔══════════════════════════════════════════════════════════════════════╗")
+    print(" " * 10 + "║       CALCULADORA IMPUESTO DE RENTA AÑO GRAVABLE 2024 (COLOMBIA)     ║")
+    print(" " * 10 + "║        Subcédula Rentas de Trabajo - Art. 336 E.T. (Ley 2277/22)     ║")
+    print(" " * 10 + "╠══════════════════════════════════════════════════════════════════════╣")
+    print(f" " * 10 + f"║ UVT 2024: {formatear_pesos(UVT):<15} | Programador: Medellín, Colombia      ║")
+    print(" " * 10 + "╚══════════════════════════════════════════════════════════════════════╝")
+    print("\n[INSTRUCCIONES]: Ingrese los valores solicitados. Use 0 si el concepto no aplica. Los valores monetarios deben ser sin puntos ni comas de miles.\n")
+
+    # --- PASO 1: Captura de Datos de Ingresos y No Constitutivos de Renta ---
+    # Total de 19 variables de captura requeridas (2 de identificación + 17 de valores)
+    imprimir_titulo_seccion("PASO 1: Datos de Identificación, Ingresos y No Gravados (Total 6 variables)")
+    
+    # Datos de identificación (2 variables)
+    nombre = input("|> NOMBRES Y APELLIDO DEL CONTRIBUYENTE: ")
+    nit = input("|> NUMERO DE IDENTIFICACION TRIBUTARIA (C.C./NIT): ")
+    
+    # [A] INGRESOS BRUTOS LABORALES (4 variables)
+    salarios = solicitar_valor("SALARIOS ")
+    cesantias_pagadas = solicitar_valor("CESANTIAS PAGADAS O CONSIGNADAS AL FONDO")
+    prestaciones_sociales = solicitar_valor("PRESTACIONES SOCIALES")
+    otros_pagos_laborales = solicitar_valor("OTROS PAGOS LABORALES")
+    ingreso_bruto_laboral_total = salarios + cesantias_pagadas + prestaciones_sociales + otros_pagos_laborales
+
+    # [B] INGRESOS NO CONSTITUTIVOS DE RENTA (INCR) (2 variables)
+    inc_salud = solicitar_valor("INCR SALUD (Aportes Obligatorios de Salud)")
+    inc_pensiones = solicitar_valor("INCR PENSIONES (Aportes Obligatorios de Pensiones)")
+    total_incr = inc_salud + inc_pensiones
+    
+    # Renta Líquida Ordinaria (RLO) - Base para el Límite del 40% (Ingreso Neto)
+    renta_liquida_ordinaria = max(0.0, ingreso_bruto_laboral_total - total_incr)
+    
+    print(f"\n  [CÁLCULO RLO]: {formatear_pesos(ingreso_bruto_laboral_total)} (IBL) - {formatear_pesos(total_incr)} (INCR) = {formatear_pesos(renta_liquida_ordinaria)} (RLO)")
+
+
+    # --- PASO 2: Captura de Deducciones, Rentas Exentas y Bases Adicionales ---
+    # (Total 13 variables restantes: 7 de deducciones/rentas + 6 históricas/adicionales)
+    imprimir_titulo_seccion("PASO 2: Deducciones, Rentas Exentas y Datos Históricos (Total 13 variables)")
+    
+    # Deducciones y Rentas Exentas (7 variables)
+    num_dependientes = solicitar_valor("NUMERO DE DEPENDIENTES DEL EMPLEADO (Max 14)", tipo=int)
+    ded_intereses_vivienda = solicitar_valor("DEDUCCION INTERESES VIVIENDA")
+    ded_medicina_prepagada = solicitar_valor("DEDUCCION MEDICINA PREPAGADA")
+    renta_exenta_pension_voluntaria = solicitar_valor("RENTAS EXENTA PENSION VOLUNTARIA")
+    renta_exenta_afc = solicitar_valor("RENTA EXENTA AFC (Cuentas AFC/AVC)")
+    valor_compras_factura = solicitar_valor("VALOR COMPRAS CON FACTURA ELECTRONICA (Base 1%)")
+    valor_gmf = solicitar_valor("GMF (Gravamen a los Movimientos Financieros)")
+    
+    # Bases Adicionales y Históricas (6 variables)
+    ingreso_mensual_promedio = solicitar_valor("INGRESO MENSUAL PROMEDIO DE LOS ULTIMOS SEIS MESES (Para Cesantías)")
+    impuesto_neto_anterior = solicitar_valor("IMPUESTO NETO DE RENTA AÑO ANTERIOR") # Para Anticipo Método #2
+    saldo_a_favor_anterior = solicitar_valor("SALDO A FAVOR SIN SOLICITUD DE DEVOLUCION O COMPENSACION")
+    retenciones_practicadas = solicitar_valor("RETENCIONES QUE LE PRACTICARON")
+    anticipo_ano_anterior = solicitar_valor("ANTICIPO DEL AÑO ANTERIOR (Pagado el año pasado)") # NUEVA VARIABLE
+    anios_declarando = solicitar_valor("NUMERO DE AÑOS QUE LLEVA DECLARANDO", tipo=int)
+    
+    # Verificación de 19 variables de captura (2+4+2 + 7+6 = 21, si contamos NIT/Nombre)
+    # Si se cuentan solo las variables numéricas de valor: 4+2+7+6 = 19. ¡Correcto!
+
+
+    # --- PASO 3: Aplicación de Límites Individuales ---
+    imprimir_titulo_seccion("PASO 3: Aplicación de Límites Individuales")
+
+    # 3.1 Deducción por Dependientes (384 UVT Anual o 10% del IBL)
+    limite_dependientes_cop = uvt_a_pesos(LIMITE_DEDUCCION_DEPENDIENTES_UVT)
+    deduccion_dependientes_anual = 0.0
+    if num_dependientes > 0:
+        # 10% del IBL (Ingreso Bruto Laboral Total)
+        deduccion_10_porciento = ingreso_bruto_laboral_total * 0.10 
+        deduccion_dependientes_anual = min(deduccion_10_porciento, limite_dependientes_cop)
+    
+    # 3.2 Deducción por Medicina Prepagada (192 UVT Anual)
+    limite_medicina_cop = uvt_a_pesos(LIMITE_DEDUCCION_MEDICINA_PREPAGADA_UVT)
+    deduccion_medicina_limitada = min(ded_medicina_prepagada, limite_medicina_cop)
+    
+    # 3.3 Deducción por Intereses de Vivienda (1.200 UVT Anual)
+    limite_intereses_vivienda_cop = uvt_a_pesos(LIMITE_DEDUCCION_INTERESES_VIVIENDA_UVT)
+    deduccion_intereses_limitada = min(ded_intereses_vivienda, limite_intereses_vivienda_cop)
+
+    # 3.4 Rentas Exentas por Pensiones Voluntarias y AFC/AVC (30% IBL o 3.800 UVT)
+    limite_pension_afc_cop = min(ingreso_bruto_laboral_total * 0.30, uvt_a_pesos(LIMITE_PENSION_AFC_VOLUNTARIA_UVT))
+    total_afc_pension = renta_exenta_pension_voluntaria + renta_exenta_afc
+    renta_exenta_afc_pension_limitada = min(total_afc_pension, limite_pension_afc_cop)
+    
+    # 3.5 Renta Exenta por Cesantías (Art. 206 Num. 4 E.T.)
+    renta_exenta_cesantias = calcular_cesantias_exentas(ingreso_mensual_promedio, cesantias_pagadas)
+    
+    print(f"  - Deducción Dependientes ({LIMITE_DEDUCCION_DEPENDIENTES_UVT} UVT): {formatear_pesos(deduccion_dependientes_anual)}")
+    print(f"  - Deducción Medicina Prepagada ({LIMITE_DEDUCCION_MEDICINA_PREPAGADA_UVT} UVT): {formatear_pesos(deduccion_medicina_limitada)}")
+    print(f"  - Deducción Intereses Vivienda ({LIMITE_DEDUCCION_INTERESES_VIVIENDA_UVT} UVT): {formatear_pesos(deduccion_intereses_limitada)}")
+    print(f"  - Renta Exenta Pensiones/AFC ({LIMITE_PENSION_AFC_VOLUNTARIA_UVT} UVT o 30% IBL): {formatear_pesos(renta_exenta_afc_pension_limitada)}")
+    print(f"  - Renta Exenta Cesantías (Art. 206 #4): {formatear_pesos(renta_exenta_cesantias)}")
+    
+    # --- PASO 4: Aplicación del Límite General (Art. 336 E.T.) ---
+    imprimir_titulo_seccion("PASO 4: Depuración (Art. 336 E.T.)")
+
+    # Suma de Deducciones y Rentas Exentas imputables ANTES de Renta Exenta 25%
+    suma_imputable_1 = (deduccion_dependientes_anual + deduccion_medicina_limitada + 
+                        deduccion_intereses_limitada + renta_exenta_afc_pension_limitada + 
+                        renta_exenta_cesantias)
+    
+    # 4.1 Renta Exenta del 25% (Art. 206 Num. 10 E.T.)
+    # La base para el 25% es RLO - Suma de otras deducciones/rentas exentas
+    base_25_exento = renta_liquida_ordinaria - suma_imputable_1
+    base_25_exento = max(0.0, base_25_exento) 
+    
+    # Límite: 790 UVT
+    renta_exenta_25_pct_calculada = base_25_exento * PORCENTAJE_RENTA_EXENTA_25_PCT
+    limite_25_pct_cop = uvt_a_pesos(LIMITE_RENTA_EXENTA_25_PCT_UVT)
+    renta_exenta_25_pct_limitada = min(renta_exenta_25_pct_calculada, limite_25_pct_cop)
+    
+    print(f"  - Renta Exenta 25% (Límite {LIMITE_RENTA_EXENTA_25_PCT_UVT} UVT): {formatear_pesos(renta_exenta_25_pct_limitada)}")
+    
+    # 4.2 Límite General y Absoluto (40% RLO o 1.340 UVT)
+    
+    # Suma total de TODAS las Deducciones y Rentas Exentas a limitar
+    total_deducciones_exentas_pre_limite = suma_imputable_1 + renta_exenta_25_pct_limitada
+    
+    # Límites del 40% de la Renta Líquida Ordinaria (Ingreso Neto) y 1340 UVT
+    limite_40_pct_cop = renta_liquida_ordinaria * LIMITE_PORCENTUAL_GENERAL
+    limite_1340_uvt_cop = uvt_a_pesos(LIMITE_GENERAL_DEDUCCIONES_EXENTAS_UVT)
+    limite_general_final = min(limite_40_pct_cop, limite_1340_uvt_cop)
+    
+    # Aplicación del límite general (Art. 336 E.T.)
+    deducciones_exentas_aceptadas = min(total_deducciones_exentas_pre_limite, limite_general_final)
+    
+    # 4.3 Renta Líquida Laboral (Antes de Deducciones Adicionales)
+    renta_liquida_laboral = renta_liquida_ordinaria - deducciones_exentas_aceptadas
+    renta_liquida_laboral = max(0.0, renta_liquida_laboral)
+    
+    # 4.4 Aplicación de Deducciones Adicionales (Factura Electrónica y GMF)
+    
+    # Deducción por Compras con Factura Electrónica (1% del valor hasta 240 UVT)
+    deduccion_factura_calculada = valor_compras_factura * PORCENTAJE_DEDUCCION_FACTURA
+    limite_factura_cop = uvt_a_pesos(LIMITE_DEDUCCION_FACTURA_ELECTRONICA_UVT)
+    deduccion_factura_limitada = min(deduccion_factura_calculada, limite_factura_cop)
+    
+    # Deducción por GMF (50% del GMF pagado)
+    deduccion_gmf = valor_gmf * PORCENTAJE_DEDUCCION_GMF
+    
+    print(f"  [LÍMITE GENERAL]: {formatear_pesos(deducciones_exentas_aceptadas)} (Menor entre {formatear_pesos(limite_40_pct_cop)} (40% RLO) y {formatear_pesos(limite_1340_uvt_cop)} (1340 UVT))")
+    
+    print(f"\n  - Deducción Factura Electrónica (1% Lim. {LIMITE_DEDUCCION_FACTURA_ELECTRONICA_UVT} UVT): {formatear_pesos(deduccion_factura_limitada)}")
+    print(f"  - Deducción GMF (50%): {formatear_pesos(deduccion_gmf)}")
+    
+    # Renta Líquida Gravable (RLG)
+    renta_liquida_gravable = renta_liquida_laboral - deduccion_factura_limitada - deduccion_gmf
+    renta_liquida_gravable = max(0.0, renta_liquida_gravable)
+
+    # --- PASO 5: Cálculo del Impuesto Neto de Renta ---
+    imprimir_titulo_seccion("PASO 5: Liquidación del Impuesto Neto de Renta")
+    
+    renta_liquida_gravable_uvt = pesos_a_uvt(renta_liquida_gravable)
+    impuesto_neto_uvt = calcular_impuesto_241(renta_liquida_gravable_uvt)
+    impuesto_neto_pesos = uvt_a_pesos(impuesto_neto_uvt)
+    
+    print(f"  - Renta Líquida Gravable (UVT): {renta_liquida_gravable_uvt:,.2f} UVT")
+    print(f"  - Impuesto Neto de Renta (UVT): {impuesto_neto_uvt:,.2f} UVT")
+    print(f"  - IMPUESTO NETO DE RENTA AÑO ACTUAL (COP): {formatear_pesos(impuesto_neto_pesos)}")
+
+    # --- PASO 6: Liquidación Final y Anticipo ---
+    imprimir_titulo_seccion("PASO 6: Cálculo de Anticipo (Art. 807 E.T.) y Saldo Final")
+
+    # 6.1 Cálculo del Anticipo para el Año Siguiente (Métodos #1 y #2)
+    anticipo_definitivo, detalle_anticipo = calcular_anticipo_renta(
+        impuesto_neto_pesos, 
+        impuesto_neto_anterior, 
+        retenciones_practicadas, 
+        anios_declarando
+    )
+
+    print(f"  - Tasa de Anticipo Aplicada: {detalle_anticipo['tasa'] * 100:.0f}% ({anios_declarando} año(s) declarado(s))")
+    print(f"  - Anticipo Método #1 (Base {formatear_pesos(detalle_anticipo['base_m1'])}): {formatear_pesos(detalle_anticipo['anticipo_m1'])}")
+    print(f"  - Anticipo Método #2 (Base {formatear_pesos(detalle_anticipo['base_m2'])}): {formatear_pesos(detalle_anticipo['anticipo_m2'])}")
+    print(f"  - ANTICIPO DEFINITIVO AÑO SIGUIENTE (Menor Valor): {formatear_pesos(anticipo_definitivo)}")
+
+
+    # 6.2 Cálculo del Saldo Final
+    
+    # Saldo Final = Impuesto Neto del Año + Anticipo Siguiente - Retenciones - Saldo a Favor Anterior - Anticipo Año Anterior (Pagado)
+    saldo_final = (
+        impuesto_neto_pesos + 
+        anticipo_definitivo - 
+        retenciones_practicadas - 
+        saldo_a_favor_anterior -
+        anticipo_ano_anterior # Se resta el anticipo que se pagó el año anterior
+    )
+    
+    print("\n   ------------------------------------------------------------------------")
+    print("                      RESULTADO FINAL DE LA DECLARACIÓN")
+    print("   ------------------------------------------------------------------------")
+    print(f"   Impuesto Neto de Renta del Año:   {formatear_pesos(impuesto_neto_pesos):>25}")
+    print(f"   (+) Anticipo Año Siguiente:       {formatear_pesos(anticipo_definitivo):>25}")
+    print(f"   (-) Retenciones Practicadas:      {formatear_pesos(retenciones_practicadas):>25}")
+    print(f"   (-) Saldo a Favor Año Anterior:   {formatear_pesos(saldo_a_favor_anterior):>25}")
+    print(f"   (-) Anticipo Año Anterior:        {formatear_pesos(anticipo_ano_anterior):>25}")
+    print("   ------------------------------------------------------------------------")
+    
+    if saldo_final > 0:
+        print(f"   (=) VALOR A PAGAR:                {formatear_pesos(saldo_final):>25}")
+    else:
+        saldo_a_favor = abs(saldo_final)
+        print(f"   (=) SALDO A FAVOR:                {formatear_pesos(saldo_a_favor):>25}")
+    print("   ------------------------------------------------------------------------")
+
+    # Estilos de presentación (sobríos: blanco y azul claro)
+    estilo_css = """
+        <style>
+            body { font-family: 'Inter', sans-serif; background-color: #F8F9FA; color: #343A40; }
+            .container { max-width: 900px; margin: 40px auto; padding: 20px; background-color: #FFFFFF; border: 1px solid #DEE2E6; border-radius: 12px; box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); }
+            h1 { text-align: center; color: #007BFF; border-bottom: 3px solid #007BFF; padding-bottom: 15px; margin-bottom: 30px; font-weight: 700; }
+            h2 { color: #0056b3; font-size: 1.25rem; border-left: 5px solid #85BDE0; background-color: #E9F6FF; padding: 10px 15px; margin-top: 25px; border-radius: 4px; }
+            pre { background-color: #F8F9FA; border: 1px solid #DEE2E6; padding: 15px; border-radius: 6px; overflow-x: auto; color: #343A40; font-size: 0.9rem; white-space: pre-wrap; word-wrap: break-word; }
+            .result-box { padding: 20px; border-radius: 10px; text-align: center; font-size: 1.6rem; font-weight: bold; margin-top: 30px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+            .result-pago { background-color: #F8D7DA; border: 2px solid #F5C6CB; color: #721C24; }
+            .result-favor { background-color: #D4EDDA; border: 2px solid #C3E6CB; color: #155724; }
+            .uvt-info { font-style: italic; font-size: 0.9rem; color: #6c757d; margin-bottom: 10px; }
+        </style>
+    """
+    
+    # Determinar la clase CSS del resultado
+    result_class = "result-pago" if saldo_final > 0 else "result-favor"
+    result_text = 'VALOR A PAGAR: ' + formatear_pesos(saldo_final) if saldo_final > 0 else 'SALDO A FAVOR: ' + formatear_pesos(abs(saldo_final))
+    
+    # Estructura HTML para la presentación
+    html_output = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CALCULADORA IMPUESTO DE RENTA AÑO GRAVABLE 2024</title>
+        {estilo_css}
+    </head>
+    <body>
+        <div class="container">
+            <h1>CALCULADORA IMPUESTO DE RENTA AÑO GRAVABLE 2024</h1>
+            <p class="uvt-info">Vigencia 2024 - UVT: {formatear_pesos(UVT)}</p>
+
+            <h2>Datos del Contribuyente</h2>
+            <p><strong>Nombres y Apellidos:</strong> {nombre}</p>
+            <p><strong>Identificación (C.C./NIT):</strong> {nit}</p>
+
+            <h2>Resumen de la Depuración (Art. 336 E.T.)</h2>
+            <pre>
+1. Ingreso Bruto Laboral Total:      {formatear_pesos(ingreso_bruto_laboral_total):>25}
+2. (-) Ingresos No Gravados (INCR):  {formatear_pesos(total_incr):>25}
+3. (=) Renta Líquida Ordinaria (RLO):{formatear_pesos(renta_liquida_ordinaria):>25}
+4. (-) Deds/Exentas Lim. 40%/1340 UVT: {formatear_pesos(deducciones_exentas_aceptadas):>25}
+   (Límite general aplicado: {formatear_pesos(limite_general_final)})
+5. (=) Renta Líquida (Preliminar):   {formatear_pesos(renta_liquida_laboral):>25}
+6. (-) Deducción Factura (1% Lim. 240): {formatear_pesos(deduccion_factura_limitada):>25}
+7. (-) Deducción GMF (50%):          {formatear_pesos(deduccion_gmf):>25}
+8. (=) Renta Líquida Gravable (RLG): {formatear_pesos(renta_liquida_gravable):>25}
+            </pre>
+            
+            <h2>Liquidación Impuesto y Saldo Final</h2>
+            <pre>
+Impuesto Neto de Renta del Año (RLG en UVT: {renta_liquida_gravable_uvt:,.2f}): {formatear_pesos(impuesto_neto_pesos):>25}
+(+) Anticipo Año Siguiente (Menor entre M1 y M2): {formatear_pesos(anticipo_definitivo):>25}
+(-) Retenciones Practicadas:      {formatear_pesos(retenciones_practicadas):>25}
+(-) Saldo a Favor Año Anterior:   {formatear_pesos(saldo_a_favor_anterior):>25}
+(-) Anticipo Año Anterior:        {formatear_pesos(anticipo_ano_anterior):>25}
+---------------------------------------------------------------------------------
+(=) SALDO FINAL:                  {formatear_pesos(saldo_final):>25}
+            </pre>
+
+            <div class="{result_class}">
+                <strong>{result_text}</strong>
+            </div>
+
+            <p class="uvt-info" style="margin-top: 20px;">*Nota: El cálculo del anticipo se realizó usando la menor entre las metodologías M#1 y M#2 del Art. 807 E.T.</p>
+            
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Devolver el HTML para la presentación estética
+    return html_output 
+
+
+# La función principal devuelve el HTML para la vista previa
+html_resultado = calculadora_renta_laboral_final()
+
+# Genero el archivo Python que contiene toda la lógica de cálculo
+print("He generado el código fuente completo en Python, que es interactivo y contiene toda la lógica de depuración y liquidación solicitada.")
+
+# Ahora generamos el archivo HTML para el resumen estético
+print("\nAquí tienes el resumen estético solicitado, con el fondo blanco y azul claro, incluyendo el resultado final:")
+
+print(f"""
